@@ -276,3 +276,9 @@ a.pill:hover { background: rgba(229, 184, 75, .2); border-color: var(--gold); }
 .page-search input::placeholder { color: #7d8194; }
 .page-search .btn { border-radius: 999px; padding: .7rem 1.6rem; }
 @media (max-width: 520px) { .page-search .btn { padding: .7rem 1rem; } .page-search svg { display: none; } .page-search { padding-left: 1rem; } }
+
+/* ---------- Search prediction polish ---------- */
+.search-results { z-index: 120; max-height: 70vh; overflow-y: auto; text-align: left; }
+.page-search { z-index: 30; }
+.page-search .search-results { top: calc(100% + 8px); border-radius: 16px; }
+.sr-item.kbd { background: rgba(229, 184, 75, .15); }

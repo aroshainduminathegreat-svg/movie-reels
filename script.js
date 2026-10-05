@@ -161,35 +161,85 @@ function updateFavCount() {
 }
 
 let ALL = [];
-function initSearch() {
-  const input = $('#search-input'), box = $('#search-results'), form = $('#search-form');
-  let seq = 0;
+/** Attach live predictions to a search <input> inside a <form>. Works for the navbar and on-page bars. */
+function attachSearch(input, form) {
+  form.style.position = 'relative';
+  let box = $('.search-results', form);
+  if (!box) { box = document.createElement('div'); box.className = 'search-results'; box.hidden = true; form.append(box); }
+  box.setAttribute('role', 'listbox');
+  let seq = 0, active = -1;
+
+  const setActive = i => {
+    const items = $$('.sr-item', box); if (!items.length) return;
+    active = (i + items.length) % items.length;
+    items.forEach((el, k) => el.classList.toggle('kbd', k === active));
+    items[active].scrollIntoView({ block: 'nearest' });
+  };
+
   const render = async () => {
     const q = input.value.trim();
+    active = -1;
+    const token = ++seq;
     if (!q) { box.hidden = true; return; }
-    let res, total;
-    if (MovieAPI.live) {
-      const token = ++seq;
-      try { const r = await MovieAPI.search(q); if (token !== seq) return; res = r.results; total = r.total; }
-      catch (e) { console.error(e); box.hidden = false; box.innerHTML = '<div class="sr-empty">Search is unavailable right now.<br><small>Please try again.</small></div>'; return; }
-    } else { res = searchMovies(ALL, q); total = res.length; }
+    let res;
+    try {
+      if (MovieAPI.live) {
+        box.hidden = false;
+        if (!box.firstElementChild) box.innerHTML = '<div class="sr-empty">Searching…</div>';
+        res = (await MovieAPI.search(q)).results;
+      } else {
+        if (!ALL.length) ALL = await MovieAPI.getAll();
+        const nq = norm(q);
+        // titles that start with what you typed rank first
+        res = searchMovies(ALL, q).sort((a, b) => (norm(b.title).startsWith(nq) - norm(a.title).startsWith(nq)) || b.popularity - a.popularity);
+      }
+    } catch (e) {
+      console.error(e);
+      if (token === seq) { box.hidden = false; box.innerHTML = '<div class="sr-empty">Search is unavailable right now.<br><small>Please try again.</small></div>'; }
+      return;
+    }
+    if (token !== seq) return; // a newer keystroke superseded this request
     box.hidden = false;
     box.innerHTML = res.length
-      ? res.slice(0, 6).map(m => `<a class="sr-item" href="movie-details.html?id=${m.id}">
-          <img class="art" src="${MovieAPI.image(m.poster, 'w342')}" alt="${esc(m.title)}" loading="lazy">
-          <span><b>${esc(m.title)}</b><small>${year(m)} • ${esc(m.genres.slice(0, 2).join(', ') || 'Movie')}${m.director ? ' • ' + esc(m.director) : ''}</small></span></a>`).join('')
-        + `<a class="sr-all" href="movies.html?q=${encodeURIComponent(q)}">See all results →</a>`
+      ? res.slice(0, 7).map(m => `<a class="sr-item" role="option" href="movie-details.html?id=${m.id}">
+          <img class="art" src="${MovieAPI.image(m.poster, 'w342')}" alt="" loading="lazy">
+          <span><b>${esc(m.title)}</b><small>${year(m)} • ${esc(m.genres.slice(0, 2).join(', ') || 'Movie')}${m.director ? ' • ' + esc(m.director) : ''}${m.rating ? ' • ★ ' + m.rating.toFixed(1) : ''}</small></span></a>`).join('')
+        + `<a class="sr-all" href="movies.html?q=${encodeURIComponent(q)}">See all results for “${esc(q)}” →</a>`
       : `<div class="sr-empty">No movies found for “${esc(q)}”.<br><small>Try a title, actor, director, genre or year.</small></div>`;
   };
-  input.addEventListener('input', debounce(render, MovieAPI.live ? 300 : 120));
+
+  input.setAttribute('autocomplete', 'off');
+  input.addEventListener('input', debounce(render, MovieAPI.live ? 200 : 60));
   input.addEventListener('focus', render);
-  form.addEventListener('submit', e => { e.preventDefault(); const q = input.value.trim(); if (q) location.href = `movies.html?q=${encodeURIComponent(q)}`; });
-  document.addEventListener('click', e => { if (!form.contains(e.target)) box.hidden = true; });
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') box.hidden = true;
-    if (e.key === '/' && !/input|textarea/i.test(document.activeElement.tagName)) { e.preventDefault(); input.focus(); }
+  input.addEventListener('keydown', e => {
+    if (box.hidden) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive(active + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(active - 1); }
+    else if (e.key === 'Enter' && active >= 0) { e.preventDefault(); $$('.sr-item', box)[active].click(); }
+    else if (e.key === 'Escape') { box.hidden = true; input.blur(); }
   });
-  const q = new URLSearchParams(location.search).get('q'); if (q) input.value = q;
+  document.addEventListener('click', e => { if (!form.contains(e.target)) box.hidden = true; });
+}
+
+let searchBound = false;
+function initSearch() {
+  if (searchBound) return; searchBound = true;
+  const pq = new URLSearchParams(location.search).get('q') || '';
+  const navInput = $('#search-input');
+  const forms = [[navInput, $('#search-form')], ...$$('.page-search').map(f => [$('input', f), f])];
+  forms.forEach(([input, form]) => {
+    if (!input || !form) return;
+    input.value = pq;
+    attachSearch(input, form);
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const q = input.value.trim();
+      location.href = q ? `movies.html?q=${encodeURIComponent(q)}` : 'movies.html';
+    });
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === '/' && !/input|textarea|select/i.test(document.activeElement.tagName)) { e.preventDefault(); navInput?.focus(); }
+  });
 }
 
 /* ---------- Global delegation: favorites ---------- */
@@ -445,7 +495,6 @@ async function initDetails() {
   let m;
   try { [ALL, m] = await Promise.all([MovieAPI.getAll(), MovieAPI.getById(id)]); }
   catch (err) { console.error(err); root.innerHTML = `<div class="wrap">${errorBox('We couldn’t load this movie.')}</div>`; return; }
-  initSearch();
   if (!m) { root.innerHTML = `<div class="wrap">${emptyBox('Movie not found', 'That title isn’t in the vault.', '<a class="btn btn-primary" href="movies.html">Browse movies</a>')}</div>`; return; }
 
   document.title = `${m.title} (${year(m)}) – CineVault`;
@@ -539,14 +588,8 @@ async function initFavorites() {
 /* ---------- Boot ---------- */
 document.addEventListener('DOMContentLoaded', async () => {
   renderLayout();
+  initSearch(); // bind immediately so search works even while page data is still loading
   const page = document.body.dataset.page;
   const boot = { home: initHome, movies: initMovies, details: initDetails, favorites: initFavorites }[page];
-  // Search needs the dataset; pages load it themselves, so init search after.
   if (boot) await boot();
-  if (page !== 'details') initSearch();
-  const pq = new URLSearchParams(location.search).get('q') || '';
-  $$('.page-search').forEach(f => {
-    const inp = $('input', f); inp.value = pq;
-    f.addEventListener('submit', e => { e.preventDefault(); const q = inp.value.trim(); location.href = q ? `movies.html?q=${encodeURIComponent(q)}` : 'movies.html'; });
-  });
 });
