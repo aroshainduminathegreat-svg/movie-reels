@@ -18,6 +18,11 @@
       <h1>Discover Movies</h1>
       <p id="count" class="dim" aria-live="polite">Loading…</p>
     </div>
+    <form class="page-search glass" role="search" aria-label="Search movies">
+      <svg viewBox="0 0 24 24" width="22" height="22"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.500-3.500"/></svg>
+      <input type="search" placeholder="Search movies, actors, directors, genres or years…" aria-label="Search movies" autocomplete="off">
+      <button class="btn btn-primary" type="submit">Search</button>
+    </form>
     <div class="q-banner glass" id="q-banner" hidden>Showing results for <b id="q-text"></b> <button class="btn btn-sm" id="q-clear">Clear</button></div>
 
     <section id="genres" class="chips-wrap" aria-label="Genres"><div class="chips" id="genre-chips"></div></section>

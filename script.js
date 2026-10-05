@@ -544,4 +544,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Search needs the dataset; pages load it themselves, so init search after.
   if (boot) await boot();
   if (page !== 'details') initSearch();
+  const pq = new URLSearchParams(location.search).get('q') || '';
+  $$('.page-search').forEach(f => {
+    const inp = $('input', f); inp.value = pq;
+    f.addEventListener('submit', e => { e.preventDefault(); const q = inp.value.trim(); location.href = q ? `movies.html?q=${encodeURIComponent(q)}` : 'movies.html'; });
+  });
 });
