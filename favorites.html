@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Favorites – CineVault</title>
+  <meta name="theme-color" content="#0b0c10">
+  <link rel="preconnect" href="https://image.tmdb.org">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-page="favorites">
+  <header id="site-header" class="site-header solid"></header>
+  <main class="wrap page-top">
+    <div class="page-title">
+      <div><h1>My Favorites</h1><p id="count" class="dim">Loading…</p></div>
+      <button class="btn" id="clear-favs" hidden>Clear all</button>
+    </div>
+    <div class="grid" id="grid"></div>
+  </main>
+  <footer id="site-footer" class="site-footer"></footer>
+  <script src="movies-data.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>

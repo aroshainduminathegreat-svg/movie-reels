@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Movies – CineVault</title>
+  <meta name="theme-color" content="#0b0c10">
+  <link rel="preconnect" href="https://image.tmdb.org">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-page="movies">
+  <header id="site-header" class="site-header solid"></header>
+  <main class="wrap page-top">
+    <div class="page-title">
+      <h1>Discover Movies</h1>
+      <p id="count" class="dim" aria-live="polite">Loading…</p>
+    </div>
+    <div class="q-banner glass" id="q-banner" hidden>Showing results for <b id="q-text"></b> <button class="btn btn-sm" id="q-clear">Clear</button></div>
+
+    <section id="genres" class="chips-wrap" aria-label="Genres"><div class="chips" id="genre-chips"></div></section>
+
+    <button class="btn filter-toggle" id="filter-toggle" aria-expanded="false" aria-controls="filters">⚙ Filters &amp; Sort</button>
+    <form class="filters glass" id="filters" onsubmit="return false">
+      <label>Genre<select id="f-genre"></select></label>
+      <label>Release year<select id="f-year"></select></label>
+      <label>Language<select id="f-lang"></select></label>
+      <label>Min rating: <b id="rating-out">Any</b>
+        <input type="range" id="f-rating" min="0" max="9" step="0.5" value="0"></label>
+      <label>Sort by
+        <select id="f-sort">
+          <option value="popularity">Popularity</option>
+          <option value="rating">Rating</option>
+          <option value="newest">Newest</option>
+        </select></label>
+      <button type="button" class="btn" id="reset">Reset</button>
+    </form>
+
+    <div class="grid" id="grid"></div>
+  </main>
+  <footer id="site-footer" class="site-footer"></footer>
+  <script src="movies-data.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
