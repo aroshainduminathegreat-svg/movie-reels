@@ -59,9 +59,24 @@ const TMDB = {
   langName(code) { try { return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code; } catch { return code; } },
 
   async get(path, params = '') {
-    const res = await fetch(`${this.base}${path}?api_key=${TMDB_API_KEY}&language=en-US${params}`);
-    if (!res.ok) throw new Error(`TMDB request failed (${res.status})`);
-    return res.json();
+    // Some networks block one TMDB hostname, so try the official alternate too.
+    const hosts = ['https://api.themoviedb.org/3', 'https://api.tmdb.org/3'];
+    let lastErr;
+    for (const host of hosts) {
+      try {
+        const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), 12000);
+        const res = await fetch(`${host}${path}?api_key=${TMDB_API_KEY}&language=en-US${params}`, { signal: ctrl.signal });
+        clearTimeout(timer);
+        if (res.status === 401) throw new Error('TMDB rejected the API key (401)');
+        if (res.status === 404) throw new Error('TMDB request failed (404)');
+        if (!res.ok) throw new Error(`TMDB request failed (${res.status})`);
+        return await res.json();
+      } catch (e) {
+        lastErr = e.name === 'AbortError' ? new Error('TMDB request timed out') : e;
+        if (/\((401|404)\)/.test(lastErr.message)) break; // retrying another host won't help
+      }
+    }
+    throw lastErr;
   },
 
   /** list item -> app movie shape (details fields filled in later) */
