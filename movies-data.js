@@ -51,7 +51,7 @@ const MOVIES = [
    Leave empty to use the local dataset above.
    NOTE: a TMDB v3 key in a static site is visible to visitors – fine for
    a portfolio project, but don't reuse a key that matters. */
-const TMDB_API_KEY = '';
+const TMDB_API_KEY = '1faff12e28d40337b97bc0260402b2f2';
 
 const TMDB = {
   base: 'https://api.themoviedb.org/3',
