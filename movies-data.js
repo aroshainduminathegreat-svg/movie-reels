@@ -43,19 +43,145 @@ const MOVIES = [
   { id: 30, title: 'Coco', tagline: 'The celebration of a lifetime.', date: '2017-11-22', rating: 8.4, runtime: 105, genres: ['Animation', 'Adventure', 'Family', 'Music'], director: 'Lee Unkrich, Adrian Molina', writers: ['Adrian Molina', 'Matthew Aldrich'], cast: ['Anthony Gonzalez', 'Gael García Bernal', 'Benjamin Bratt', 'Alanna Ubach'], overview: 'Aspiring musician Miguel enters the Land of the Dead to find his great-great-grandfather, a legendary singer, and uncovers his family’s history.', trailer: 'https://www.youtube.com/watch?v=Rvr68u6k5sI', language: 'English', country: 'United States', budget: 175000000, boxOffice: 807817000, companies: ['Pixar Animation Studios', 'Walt Disney Pictures'], poster: '/gGEsBPAijhVUFoiNpgZXqRVWJt2.jpg', backdrop: '', popularity: 86 }
 ];
 
-/* ------------- Replaceable API layer ------------- */
+
+/* ------------- Replaceable API layer -------------
+   Paste a free TMDB API key (v3 "API Key") below to load ~500+ real
+   movies from themoviedb.org instead of the 30 built-in ones.
+   Get one at https://www.themoviedb.org/settings/api (free account).
+   Leave empty to use the local dataset above.
+   NOTE: a TMDB v3 key in a static site is visible to visitors – fine for
+   a portfolio project, but don't reuse a key that matters. */
+const TMDB_API_KEY = '';
+
+const TMDB = {
+  base: 'https://api.themoviedb.org/3',
+  genres: { 28: 'Action', 12: 'Adventure', 16: 'Animation', 35: 'Comedy', 80: 'Crime', 99: 'Documentary', 18: 'Drama', 10751: 'Family', 14: 'Fantasy', 36: 'History', 27: 'Horror', 10402: 'Music', 9648: 'Mystery', 10749: 'Romance', 878: 'Sci-Fi', 10770: 'TV Movie', 53: 'Thriller', 10752: 'War', 37: 'Western' },
+  langName(code) { try { return new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code; } catch { return code; } },
+
+  async get(path, params = '') {
+    const res = await fetch(`${this.base}${path}?api_key=${TMDB_API_KEY}&language=en-US${params}`);
+    if (!res.ok) throw new Error(`TMDB request failed (${res.status})`);
+    return res.json();
+  },
+
+  /** list item -> app movie shape (details fields filled in later) */
+  fromList(r) {
+    return {
+      id: r.id, title: r.title, tagline: '', date: r.release_date || '1900-01-01',
+      rating: Math.round((r.vote_average || 0) * 10) / 10, runtime: 0,
+      genres: (r.genre_ids || []).map(g => this.genres[g]).filter(Boolean),
+      director: '', writers: [], cast: [], overview: r.overview || 'No overview available.',
+      trailer: '', language: this.langName(r.original_language), country: '', budget: 0, boxOffice: 0,
+      companies: [], poster: r.poster_path || '', backdrop: r.backdrop_path || '', popularity: r.popularity || 0,
+      _votes: r.vote_count || 0
+    };
+  },
+
+  fromDetails(d) {
+    const crew = d.credits?.crew || [];
+    const dirs = crew.filter(c => c.job === 'Director').map(c => c.name);
+    const writers = [...new Set(crew.filter(c => ['Screenplay', 'Writer', 'Story'].includes(c.job)).map(c => c.name))];
+    const vids = d.videos?.results || [];
+    const t = vids.find(v => v.site === 'YouTube' && v.type === 'Trailer' && v.official) || vids.find(v => v.site === 'YouTube' && v.type === 'Trailer') || vids.find(v => v.site === 'YouTube');
+    return {
+      ...this.fromList({ ...d, genre_ids: (d.genres || []).map(g => g.id) }),
+      tagline: d.tagline || '', runtime: d.runtime || 0,
+      director: dirs.join(', ') || 'Unknown', writers: writers.slice(0, 4),
+      cast: (d.credits?.cast || []).slice(0, 8).map(c => c.name),
+      trailer: t ? `https://www.youtube.com/watch?v=${t.key}` : '',
+      language: (d.spoken_languages?.[0]?.english_name) || this.langName(d.original_language),
+      country: (d.production_countries || []).map(c => c.name).join(', ') || 'N/A',
+      budget: d.budget || 0, boxOffice: d.revenue || 0,
+      companies: (d.production_companies || []).map(c => c.name)
+    };
+  },
+
+  languages: [['en', 'English'], ['hi', 'Hindi'], ['ta', 'Tamil'], ['te', 'Telugu'], ['ml', 'Malayalam'], ['kn', 'Kannada'], ['ko', 'Korean'], ['ja', 'Japanese'], ['zh', 'Chinese'], ['fr', 'French'], ['es', 'Spanish'], ['de', 'German'], ['it', 'Italian'], ['pt', 'Portuguese'], ['ru', 'Russian'], ['tr', 'Turkish'], ['th', 'Thai'], ['sv', 'Swedish']],
+
+  _page(r, extra = {}) {
+    return {
+      results: (r.results || []).filter(x => x.poster_path && x.release_date).map(x => this.fromList(x)),
+      totalPages: Math.min(r.total_pages || 1, 500), total: r.total_results || 0, ...extra
+    };
+  },
+
+  /** Server-side filtering over the ENTIRE TMDB catalogue. f: {genre(name), year, minRating, language(code), sort} */
+  async discover(f = {}, page = 1) {
+    const today = new Date().toISOString().slice(0, 10);
+    const gid = Object.keys(this.genres).find(k => this.genres[k] === f.genre);
+    const sorts = {
+      popularity: '&sort_by=popularity.desc',
+      rating: '&sort_by=vote_average.desc&vote_count.gte=300',
+      newest: `&sort_by=primary_release_date.desc&primary_release_date.lte=${today}&vote_count.gte=15`
+    };
+    let p = `&page=${page}&include_adult=false` + (sorts[f.sort] || sorts.popularity);
+    if (gid) p += `&with_genres=${gid}`;
+    if (f.year) p += `&primary_release_year=${f.year}`;
+    if (Number(f.minRating) > 0) p += `&vote_average.gte=${f.minRating}&vote_count.gte=100`;
+    if (f.language) p += `&with_original_language=${f.language}`;
+    return this._page(await this.get('/discover/movie', p));
+  },
+
+  /** Title search + actor/director search (via people's known-for) + year/genre keywords. */
+  async search(q, page = 1) {
+    q = q.trim();
+    if (/^(19|20)\d\d$/.test(q)) return this.discover({ year: q, sort: 'popularity' }, page);
+    const g = Object.values(this.genres).find(n => n.toLowerCase() === q.toLowerCase());
+    if (g) return this.discover({ genre: g, sort: 'popularity' }, page);
+    const enc = `&query=${encodeURIComponent(q)}&include_adult=false&page=${page}`;
+    const [movies, people] = await Promise.all([
+      this.get('/search/movie', enc),
+      page === 1 ? this.get('/search/person', `&query=${encodeURIComponent(q)}`) : Promise.resolve({ results: [] })
+    ]);
+    const out = this._page(movies);
+    const known = (people.results || []).slice(0, 3).flatMap(p => p.known_for || []).filter(k => k.media_type === 'movie');
+    const seen = new Set(out.results.map(m => m.id));
+    const extra = this._page({ results: known }).results.filter(m => !seen.has(m.id));
+    out.results = [...extra, ...out.results];   // matching people's films first
+    out.total += extra.length;
+    return out;
+  },
+
+  async list() {
+    const cached = sessionStorage.getItem('cinevault:tmdb-list');
+    if (cached) { try { return JSON.parse(cached); } catch { /* refetch */ } }
+    const pages = (endpoint, n, extra = '') => Array.from({ length: n }, (_, i) => this.get(endpoint, `&page=${i + 1}${extra}`));
+    const results = await Promise.all([
+      ...pages('/movie/popular', 12),
+      ...pages('/movie/top_rated', 12),
+      ...pages('/movie/now_playing', 4)
+    ]);
+    const seen = new Map();
+    results.flatMap(r => r.results).forEach(r => { if (r.poster_path && r.release_date && !seen.has(r.id)) seen.set(r.id, this.fromList(r)); });
+    const out = [...seen.values()];
+    try { sessionStorage.setItem('cinevault:tmdb-list', JSON.stringify(out)); } catch { /* quota */ }
+    return out;
+  }
+};
+
 const MovieAPI = {
-  /** Simulated network latency so loading states are visible. */
+  /** true when using the live TMDB data source */
+  live: !!TMDB_API_KEY,
+
+  /** Simulated network latency so loading states are visible (local mode). */
   _delay(ms = 450) { return new Promise(r => setTimeout(r, ms)); },
 
-  /** Return every movie. Swap with: fetch(...).then(normalize) */
+  /** Return every movie. */
   async getAll() {
+    if (this.live) {
+      try { return await TMDB.list(); }
+      catch (e) { console.warn('TMDB failed, using local data:', e); this.live = false; }
+    }
     await this._delay();
     return MOVIES.map(m => ({ ...m }));
   },
 
   /** Return one movie by id (or null). */
   async getById(id) {
+    if (this.live) {
+      try { return TMDB.fromDetails(await TMDB.get(`/movie/${Number(id)}`, '&append_to_response=credits,videos')); }
+      catch (e) { if (/404/.test(e.message)) return null; throw e; }
+    }
     await this._delay(300);
     const m = MOVIES.find(x => x.id === Number(id));
     return m ? { ...m } : null;

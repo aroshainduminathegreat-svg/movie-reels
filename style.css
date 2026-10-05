@@ -263,3 +263,7 @@ a.pill:hover { background: rgba(229, 184, 75, .2); border-color: var(--gold); }
   .cast { grid-template-columns: repeat(2, 1fr); }
 }
 @media (hover: none) { .card:hover { transform: none; } .card-hover { display: none; } .row-btn { display: none; } }
+
+/* ---------- Load more (live mode) ---------- */
+.load-more { display: flex; flex-direction: column; align-items: center; gap: .8rem; padding: 0 0 3rem; min-height: 20px; }
+.load-more .btn { padding: .85rem 2.2rem; }

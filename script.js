@@ -9,7 +9,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const year = m => new Date(m.date).getFullYear();
-const fmtRuntime = min => `${Math.floor(min / 60)}h ${min % 60}m`;
+const fmtRuntime = min => min ? `${Math.floor(min / 60)}h ${min % 60}m` : '—';
 const fmtMoney = n => !n ? 'N/A' : n >= 1e9 ? `$${(n / 1e9).toFixed(2)}B` : `$${Math.round(n / 1e6).toLocaleString()}M`;
 const fmtDate = d => new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 const norm = s => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -31,11 +31,14 @@ const Store = {
 /* ---------- Favorites ---------- */
 const Favorites = {
   ids: new Set(Store.get('favorites', [])),
+  data: Store.get('favdata', {}), // snapshots so favorites survive even if the movie list changes
   has(id) { return this.ids.has(id); },
-  toggle(id) {
+  toggle(id, movie) {
     const added = !this.ids.has(id);
     added ? this.ids.add(id) : this.ids.delete(id);
+    if (added && movie) this.data[id] = movie; else delete this.data[id];
     Store.set('favorites', [...this.ids]);
+    Store.set('favdata', this.data);
     $$(`[data-fav="${id}"]`).forEach(b => {
       b.classList.toggle('active', added);
       b.setAttribute('aria-pressed', added);
@@ -82,8 +85,8 @@ function movieCard(m, i = 0) {
       ${posterImg(m)}
       <span class="rating-badge">★ ${m.rating.toFixed(1)}</span>
       <div class="card-hover">
-        <p class="hover-dir"><b>Director:</b> ${esc(m.director)}</p>
-        <p class="hover-cast">${esc(m.cast.slice(0, 3).join(', '))}</p>
+        ${m.director ? `<p class="hover-dir"><b>Director:</b> ${esc(m.director)}</p>` : ''}
+        ${m.cast.length ? `<p class="hover-cast">${esc(m.cast.slice(0, 3).join(', '))}</p>` : ''}
         <p class="hover-ov">${esc(m.overview)}</p>
       </div>
     </a>
@@ -160,19 +163,25 @@ function updateFavCount() {
 let ALL = [];
 function initSearch() {
   const input = $('#search-input'), box = $('#search-results'), form = $('#search-form');
-  const render = () => {
+  let seq = 0;
+  const render = async () => {
     const q = input.value.trim();
     if (!q) { box.hidden = true; return; }
-    const res = searchMovies(ALL, q);
+    let res, total;
+    if (MovieAPI.live) {
+      const token = ++seq;
+      try { const r = await MovieAPI.search(q); if (token !== seq) return; res = r.results; total = r.total; }
+      catch (e) { console.error(e); box.hidden = false; box.innerHTML = '<div class="sr-empty">Search is unavailable right now.<br><small>Please try again.</small></div>'; return; }
+    } else { res = searchMovies(ALL, q); total = res.length; }
     box.hidden = false;
     box.innerHTML = res.length
       ? res.slice(0, 6).map(m => `<a class="sr-item" href="movie-details.html?id=${m.id}">
           <img class="art" src="${MovieAPI.image(m.poster, 'w342')}" alt="${esc(m.title)}" loading="lazy">
-          <span><b>${esc(m.title)}</b><small>${year(m)} • ${esc(m.genres.slice(0, 2).join(', '))} • ${esc(m.director)}</small></span></a>`).join('')
-        + `<a class="sr-all" href="movies.html?q=${encodeURIComponent(q)}">See all ${res.length} result${res.length > 1 ? 's' : ''} →</a>`
+          <span><b>${esc(m.title)}</b><small>${year(m)} • ${esc(m.genres.slice(0, 2).join(', ') || 'Movie')}${m.director ? ' • ' + esc(m.director) : ''}</small></span></a>`).join('')
+        + `<a class="sr-all" href="movies.html?q=${encodeURIComponent(q)}">See all results →</a>`
       : `<div class="sr-empty">No movies found for “${esc(q)}”.<br><small>Try a title, actor, director, genre or year.</small></div>`;
   };
-  input.addEventListener('input', debounce(render, 120));
+  input.addEventListener('input', debounce(render, MovieAPI.live ? 300 : 120));
   input.addEventListener('focus', render);
   form.addEventListener('submit', e => { e.preventDefault(); const q = input.value.trim(); if (q) location.href = `movies.html?q=${encodeURIComponent(q)}`; });
   document.addEventListener('click', e => { if (!form.contains(e.target)) box.hidden = true; });
@@ -188,8 +197,8 @@ document.addEventListener('click', e => {
   const b = e.target.closest('[data-fav]'); if (!b) return;
   e.preventDefault();
   const id = Number(b.dataset.fav);
-  const added = Favorites.toggle(id);
-  const m = ALL.find(x => x.id === id);
+  const m = ALL.find(x => x.id === id) || Favorites.data[id];
+  const added = Favorites.toggle(id, m);
   toast(added ? `Added “${m?.title}” to favorites` : `Removed “${m?.title}” from favorites`);
   if (document.body.dataset.page === 'favorites') renderFavorites();
 });
@@ -279,7 +288,90 @@ function initRows() {
 /* ---------- MOVIES (discovery) ---------- */
 const DEFAULTS = { genre: '', year: '', minRating: '0', language: '', sort: 'popularity' };
 
+/** Live mode: filters/search run server-side over the entire TMDB catalogue, with "Load more". */
+async function initMoviesLive() {
+  const grid = $('#grid'), count = $('#count');
+  const params = new URLSearchParams(location.search);
+  const saved = Store.get('prefs-live', {});
+  const hasParams = ['genre', 'year', 'minRating', 'language', 'sort', 'q'].some(k => params.has(k));
+  const state = { ...DEFAULTS, ...(hasParams ? {} : saved) };
+  ['genre', 'year', 'minRating', 'language', 'sort'].forEach(k => params.has(k) && (state[k] = params.get(k)));
+  state.q = params.get('q') || '';
+
+  const genres = Object.values(TMDB.genres).sort();
+  const thisYear = new Date().getFullYear();
+  const years = Array.from({ length: thisYear - 1899 }, (_, i) => thisYear - i);
+  $('#f-genre').innerHTML = `<option value="">All genres</option>` + genres.map(g => `<option>${g}</option>`).join('');
+  $('#f-year').innerHTML = `<option value="">Any year</option>` + years.map(y => `<option>${y}</option>`).join('');
+  $('#f-lang').innerHTML = `<option value="">Any language</option>` + TMDB.languages.map(([c, n]) => `<option value="${c}">${n}</option>`).join('');
+  $('#genre-chips').innerHTML = `<button class="chip" data-g="">All</button>` + genres.map(g => `<button class="chip" data-g="${g}">${g}</button>`).join('');
+
+  let page = 1, totalPages = 1, token = 0, loaded = [];
+  let more = $('#load-more');
+  if (!more) { more = document.createElement('div'); more.id = 'load-more'; more.className = 'load-more'; grid.after(more); }
+
+  const sync = () => {
+    $('#f-genre').value = state.genre; $('#f-year').value = state.year; $('#f-lang').value = state.language;
+    $('#f-rating').value = state.minRating; $('#f-sort').value = state.sort;
+    $('#rating-out').textContent = Number(state.minRating) > 0 ? `${state.minRating}+` : 'Any';
+    $$('.chip').forEach(c => c.classList.toggle('active', c.dataset.g === state.genre));
+    $('#q-banner').hidden = !state.q; $('#q-text').textContent = state.q;
+  };
+  const clientFilter = list => list.filter(m =>
+    (!state.genre || m.genres.includes(state.genre)) && (!state.year || year(m) === Number(state.year)) &&
+    m.rating >= Number(state.minRating) && (!state.language || m.language === (TMDB.languages.find(l => l[0] === state.language) || [])[1]));
+  const sortList = list => {
+    const s = { popularity: (a, b) => b.popularity - a.popularity, rating: (a, b) => b.rating - a.rating, newest: (a, b) => new Date(b.date) - new Date(a.date) };
+    return [...list].sort(s[state.sort]);
+  };
+
+  async function load(reset) {
+    const my = ++token;
+    if (reset) { page = 1; loaded = []; grid.innerHTML = skeletons(12); more.innerHTML = ''; count.textContent = 'Loading…'; Store.set('prefs-live', { genre: state.genre, year: state.year, minRating: state.minRating, language: state.language, sort: state.sort }); sync(); }
+    else { more.innerHTML = '<div class="spinner" style="margin:auto"></div>'; }
+    try {
+      const r = state.q ? await MovieAPI.search(state.q, page) : await MovieAPI.discover(state, page);
+      if (my !== token) return;
+      totalPages = r.totalPages;
+      const fresh = r.results.filter(m => !loaded.some(x => x.id === m.id));
+      loaded = loaded.concat(fresh);
+      fresh.forEach(m => { if (!ALL.some(x => x.id === m.id)) ALL.push(m); });
+      // with a text query, filters/sort are applied client-side on the results found
+      const shown = state.q ? sortList(clientFilter(loaded)) : loaded;
+      count.textContent = state.q ? `${shown.length} result${shown.length === 1 ? '' : 's'} for “${state.q}”` : `${r.total.toLocaleString()} movies`;
+      grid.innerHTML = shown.length ? shown.map((m, i) => movieCard(m, state.q ? i : i % 20)).join('')
+        : emptyBox('No movies found', 'Try adjusting your search or filters.', '<button class="btn" id="reset-empty">Reset filters</button>');
+      const re = $('#reset-empty'); if (re) re.onclick = reset;
+      more.innerHTML = page < totalPages ? '<button class="btn" id="more-btn">Load more movies</button>' : (shown.length > 20 ? '<p class="dim">You’ve reached the end.</p>' : '');
+      const mb = $('#more-btn'); if (mb) mb.onclick = () => { page++; load(false); };
+    } catch (err) {
+      if (my !== token) return;
+      console.error(err);
+      if (page > 1) { page--; more.innerHTML = '<p class="dim">Couldn’t load more.</p><button class="btn" id="more-btn">Retry</button>'; $('#more-btn').onclick = () => { page++; load(false); }; }
+      else { count.textContent = ''; grid.innerHTML = errorBox('We couldn’t reach the movie database.'); more.innerHTML = ''; }
+    }
+  }
+  const reset = () => { Object.assign(state, DEFAULTS, { q: '' }); history.replaceState(null, '', 'movies.html'); const si = $('#search-input'); if (si) si.value = ''; load(true); };
+  const set = (k, v) => { state[k] = v; load(true); };
+  const loadSoon = debounce(() => load(true), 250);
+
+  $('#f-genre').onchange = e => set('genre', e.target.value);
+  $('#f-year').onchange = e => set('year', e.target.value);
+  $('#f-lang').onchange = e => set('language', e.target.value);
+  $('#f-rating').oninput = e => { state.minRating = e.target.value; sync(); loadSoon(); };
+  $('#f-sort').onchange = e => set('sort', e.target.value);
+  $('#genre-chips').onclick = e => { const c = e.target.closest('.chip'); if (c) set('genre', c.dataset.g); };
+  $('#reset').onclick = reset; $('#q-clear').onclick = reset;
+  $('#filter-toggle').onclick = e => { const o = $('#filters').classList.toggle('open'); e.currentTarget.setAttribute('aria-expanded', o); };
+  sync(); await load(true);
+  if (location.hash === '#genres') setTimeout(() => $('#genres').scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+}
+
 async function initMovies() {
+  if (MovieAPI.live) {
+    try { return await initMoviesLive(); }
+    catch (e) { console.warn('Live mode failed, using local data', e); MovieAPI.live = false; }
+  }
   const grid = $('#grid'), count = $('#count');
   grid.innerHTML = skeletons(12);
   try { ALL = await MovieAPI.getAll(); }
@@ -357,6 +449,7 @@ async function initDetails() {
   if (!m) { root.innerHTML = `<div class="wrap">${emptyBox('Movie not found', 'That title isn’t in the vault.', '<a class="btn btn-primary" href="movies.html">Browse movies</a>')}</div>`; return; }
 
   document.title = `${m.title} (${year(m)}) – CineVault`;
+  if (!ALL.some(x => x.id === m.id)) ALL.push(m);
   const vid = ytId(m.trailer);
   const similar = ALL.filter(x => x.id !== m.id)
     .map(x => ({ x, s: x.genres.filter(g => m.genres.includes(g)).length * 10 + (x.director === m.director ? 15 : 0) + x.rating }))
@@ -386,12 +479,12 @@ async function initDetails() {
       <h2>Overview</h2><p class="overview">${esc(m.overview)}</p>
       <div class="people">
         <div><span class="lbl">Director</span><p>${esc(m.director)}</p></div>
-        <div><span class="lbl">Writers</span><p>${esc(m.writers.join(', '))}</p></div>
+        <div><span class="lbl">Writers</span><p>${esc(m.writers.join(', ') || 'N/A')}</p></div>
       </div>
     </section>
     <aside class="facts glass fade-in">
       ${fact('Release date', fmtDate(m.date))}${fact('Runtime', fmtRuntime(m.runtime))}${fact('Language', esc(m.language))}${fact('Country', esc(m.country))}
-      ${fact('Budget', fmtMoney(m.budget))}${fact('Box office', fmtMoney(m.boxOffice))}${fact('Production', esc(m.companies.join(', ')))}
+      ${fact('Budget', fmtMoney(m.budget))}${fact('Box office', fmtMoney(m.boxOffice))}${fact('Production', esc(m.companies.join(', ') || 'N/A'))}
     </aside>
   </div>
   <div class="wrap">
@@ -427,7 +520,7 @@ async function initDetails() {
 /* ---------- FAVORITES ---------- */
 function renderFavorites() {
   const grid = $('#grid');
-  const list = ALL.filter(m => Favorites.has(m.id));
+  const list = [...Favorites.ids].map(id => ALL.find(m => m.id === id) || Favorites.data[id]).filter(Boolean);
   $('#count').textContent = `${list.length} saved movie${list.length === 1 ? '' : 's'}`;
   $('#clear-favs').hidden = !list.length;
   grid.innerHTML = list.length ? list.map(movieCard).join('')
