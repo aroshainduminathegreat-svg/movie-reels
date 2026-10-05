@@ -187,6 +187,12 @@ const MovieAPI = {
     return m ? { ...m } : null;
   },
 
+  /** Browse the whole catalogue with server-side filters (live mode only). */
+  discover(filters, page = 1) { return TMDB.discover(filters, page); },
+
+  /** Search titles, people (actors/directors), years and genres (live mode only). */
+  search(query, page = 1) { return TMDB.search(query, page); },
+
   /** Build an image URL. size: w342 | w500 | w780 | w1280 | original */
   image(path, size = 'w500') {
     return path ? IMG_BASE + size + path : '';

@@ -398,7 +398,7 @@ async function initMoviesLive() {
       if (my !== token) return;
       console.error(err);
       if (page > 1) { page--; more.innerHTML = '<p class="dim">Couldn’t load more.</p><button class="btn" id="more-btn">Retry</button>'; $('#more-btn').onclick = () => { page++; load(false); }; }
-      else { count.textContent = ''; grid.innerHTML = errorBox('We couldn’t reach the movie database.'); more.innerHTML = ''; }
+      else { count.textContent = ''; grid.innerHTML = errorBox(`We couldn’t load movies (${err.message || 'network error'}).`); more.innerHTML = ''; }
     }
   }
   const reset = () => { Object.assign(state, DEFAULTS, { q: '' }); history.replaceState(null, '', 'movies.html'); const si = $('#search-input'); if (si) si.value = ''; load(true); };
