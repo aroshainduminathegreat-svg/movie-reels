@@ -143,7 +143,7 @@ function renderLayout() {
     </div>
   </nav>`;
   $('#site-footer').innerHTML = `<div class="footer-inner"><a class="logo" href="index.html"><span class="logo-mark">▶</span>Cine<b>Vault</b></a>
-    <p>A portfolio project · Movie data &amp; images courtesy of TMDB-style public sources. Not affiliated with any studio.</p></div>`;
+    <p>&copy; 2026 cine vault pro &middot; Created by arosha Indumina &middot; All rights reserved.</p></div>`;
 
   const header = $('#site-header');
   addEventListener('scroll', () => header.classList.toggle('scrolled', scrollY > 30), { passive: true });
